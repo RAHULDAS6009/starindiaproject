@@ -1,0 +1,224 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  GENERAL_USER
+  ARTIST
+  PRODUCTION
+  CASTING
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum PostType {
+  POST
+  REEL
+}
+
+enum CastingStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  COMPLETED
+}
+
+enum ApplicantStatus {
+  APPLIED
+  SHORTLISTED
+  REJECTED
+  ACCEPTED
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+  FAILED
+}
+
+enum PaymentType {
+  WALLET_TOPUP
+  CASTING_PAYMENT
+  SUBSCRIPTION
+  REFUND
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  BAN
+  UNBAN
+  ROLE_CHANGE
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  role          UserRole  @default(GENERAL_USER)
+  profilePic    String?   @map("profile_pic")
+  status        String?   // online, offline, etc.
+  verified      Boolean   @default(false)
+  bio           String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  posts         Post[]
+  comments      Comment[]
+  likes         Like[]
+  followers     Follow[]  @relation("Follower")
+  following     Follow[]  @relation("Following")
+  castings      Casting[] @relation("CreatedBy")
+  applications  CastingApplicant[]
+  paymentsSent  Payment[] @relation("Payer")
+  paymentsReceived Payment[] @relation("Payee")
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model Post {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  type        PostType
+  mediaUrl    String?   @map("media_url")
+  caption     String?
+  likesCount  Int       @default(0) @map("likes_count")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comments    Comment[]
+
+  @@map("posts")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  postId    String   @map("post_id")
+  userId    String   @map("user_id")
+  text      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("comments")
+}
+
+model Like {
+  id         String   @id @default(cuid())
+  userId     String   @map("user_id")
+  targetId   String   @map("target_id")
+  targetType String   @map("target_type") // "post" | "comment"
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, targetId, targetType])
+  @@map("likes")
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String   @map("follower_id")
+  followingId String   @map("following_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@map("follows")
+}
+
+model Casting {
+  id          String            @id @default(cuid())
+  projectName String            @map("project_name")
+  description String?
+  status      CastingStatus     @default(DRAFT)
+  createdById String            @map("created_by_id")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  createdBy   User              @relation("CreatedBy", fields: [createdById], references: [id])
+  applicants  CastingApplicant[]
+
+  @@map("castings")
+}
+
+model CastingApplicant {
+  id        String           @id @default(cuid())
+  castingId String           @map("casting_id")
+  userId    String           @map("user_id")
+  status    ApplicantStatus  @default(APPLIED)
+  message   String?
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  casting   Casting          @relation(fields: [castingId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([castingId, userId])
+  @@map("casting_applicants")
+}
+
+model Payment {
+  id        String        @id @default(cuid())
+  payerId   String        @map("payer_id")
+  payeeId   String?       @map("payee_id")
+  amount    Decimal       @db.Decimal(10, 2)
+  status    PaymentStatus @default(PENDING)
+  type      PaymentType
+  metadata  Json?         // Additional payment details
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  payer     User          @relation("Payer", fields: [payerId], references: [id])
+  payee     User?         @relation("Payee", fields: [payeeId], references: [id])
+
+  @@map("payments")
+}
+
+model AuditLog {
+  id         String      @id @default(cuid())
+  adminId    String      @map("admin_id")
+  action     AuditAction
+  targetType String?     @map("target_type") // "user" | "post" | "payment" | etc.
+  targetId   String?     @map("target_id")
+  status     String      // "success" | "failed"
+  meta       Json?       // Additional context
+  timestamp  DateTime    @default(now())
+
+  // Relations
+  admin      User        @relation(fields: [adminId], references: [id])
+
+  @@index([adminId])
+  @@index([timestamp])
+  @@index([targetType, targetId])
+  @@map("audit_logs")
+}
+
